@@ -23,6 +23,8 @@
 #include "espfs.h"
 #include "uart.h"
 #include "serbridge.h"
+#include "tlv.h"
+#include "vncbridge.h"
 #include "status.h"
 #include "serled.h"
 #include "console.h"
@@ -125,7 +127,7 @@ void user_init(void) {
   os_printf("Flash config restore %s\n", restoreOk ? "ok" : "*FAILED*");
   // Status LEDs
   statusInit();
-  serledInit();
+  // serledInit();
   // Wifi
   wifiInit();
   // init the flash filesystem with the html stuff
@@ -135,8 +137,11 @@ void user_init(void) {
   // mount the http handlers
   httpdInit(builtInUrls, 80);
   // init the wifi-serial transparent bridge (port 23)
-  serbridgeInit(23, 2323);
-  uart_add_recv_cb(&serbridgeUartCb);
+//  serbridgeInit(23, 2323);
+  vncbridgeInit(5900);
+//  uart_add_recv_cb(&serbridgeUartCb);
+  uart_add_recv_cb(&tlvUartCb);
+  // uart_add_recv_cb(&vncbridgeUartCb);
 #ifdef SHOW_HEAP_USE
   os_timer_disarm(&prHeapTimer);
   os_timer_setfn(&prHeapTimer, prHeapTimerCb, NULL);

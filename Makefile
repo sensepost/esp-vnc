@@ -84,7 +84,8 @@ LED_SERIAL_PIN      ?= 14
 # --------------- esp-link modules config options ---------------
 
 # Optional Modules mqtt
-MODULES ?= mqtt rest syslog
+# MODULES ?= mqtt rest
+MODULES ?= syslog
 
 # --------------- esphttpd config options ---------------
 
@@ -205,7 +206,7 @@ endif
 
 # which modules (subdirectories) of the project to include in compiling
 LIBRARIES_DIR 	= libraries
-MODULES		  	+= espfs httpd user serial cmd esp-link
+MODULES		  	+= espfs httpd user serial tlv vnc cmd esp-link
 MODULES			+= $(foreach sdir,$(LIBRARIES_DIR),$(wildcard $(sdir)/*))
 EXTRA_INCDIR 	= include .
 
