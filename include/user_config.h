@@ -5,7 +5,7 @@
 #include <_mingw.h>
 #endif
 
-#undef SHOW_HEAP_USE
+#define SHOW_HEAP_USE
 #define DEBUGIP
 #define SDK_DBG
 
@@ -35,7 +35,7 @@
 #undef CGISERVICES_DBG
 
 // If defined, the default hostname for DHCP will include the chip ID to make it unique
-#undef CHIP_IN_HOSTNAME
+#define CHIP_IN_HOSTNAME
 
 extern char* esp_link_version;
 extern uint8_t UTILS_StrToIP(const char* str, void *ip);

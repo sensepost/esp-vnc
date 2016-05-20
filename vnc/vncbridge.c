@@ -5,14 +5,30 @@
 #include "uart.h"
 #include "vncbridge.h"
 #include "config.h"
+#ifdef SYSLOG
 #include "syslog.h"
+#else
+#define syslog(a,...)
+#endif
 #include "tlv.h"
+#include "task.h"
 
 #define SKIP_AT_RESET
-#define VNCBR_DBG
 
-#define KEYSTROKE_CHANNEL 1
-#define POINTER_CHANNEL 2
+// Send buffer size
+#define MAX_TXBUFFER (1460)
+#define MAX_RXBUFFER (6*1460)
+
+#define VNCBR_DBG
+#ifdef VNCBR_DBG
+#define DBG(format, ...) do { os_printf(format, ## __VA_ARGS__); } while(0)
+#define DBG_RATE(timeout, format, ...) do { static uint32_t t = 0; if (system_get_time() - t > (timeout)) { DBG(format, ## __VA_ARGS__); t = system_get_time(); } } while (0);
+#else
+#define DBG(format, ...) do { } while(0)
+#define DBG_RATE(format, ...)
+#endif
+
+LOCAL uint8_t deferredTaskNum;
 
 static struct espconn vncbridgeConn; // plain bridging port
 static esp_tcp vncbridgeTcp;
@@ -32,10 +48,14 @@ static const char INIT_MESSAGE[] = { 0x0B, 0x40 /* 2880 */, 0x07, 0x08 /* 1800 *
   0x08, 0x08, 0x00, 0x01, 0x00, 0x07, 0x00, 0x07, 0x00, 0x03, 0x00, 0x03, 0x06 /* pixelformat */, 0x00, 0x00, 0x00,
   0x00, 0x00, 0x00, 0x06 /* length */, 'V', 'N', 'C', '_', 'K', 'M' };
   
-
-
 // Connection pool
-vncbridgeConnData connData[VNC_MAX_CONN];
+vncbridgeConnData vncConnData[VNC_MAX_CONN];
+
+static void ICACHE_FLASH_ATTR
+vncProcessRX(vncbridgeConnData *conn);
+
+static bool ICACHE_FLASH_ATTR
+emitKeyEvent(bool pressed, uint32 key);
 
 //===== uC -> TCP
 
@@ -47,7 +67,7 @@ sendtxbuffer(vncbridgeConnData *conn)
 {
   sint8 result = ESPCONN_OK;
   if (conn->txbufferlen != 0) {
-    // os_printf("TX %p %d\n", conn, conn->txbufferlen);
+    // DBG("TX %p %d\n", conn, conn->txbufferlen);
     conn->readytosend = false;
     result = espconn_sent(conn->conn, (uint8_t*)conn->txbuffer, conn->txbufferlen);
     conn->txbufferlen = 0;
@@ -77,7 +97,7 @@ espbuffsend(vncbridgeConnData *conn, const char *data, uint16 len)
   // make sure we indeed have a buffer
   if (conn->txbuffer == NULL) conn->txbuffer = os_zalloc(MAX_TXBUFFER);
   if (conn->txbuffer == NULL) {
-    os_printf("espbuffsend: cannot alloc tx buffer\n");
+    os_printf("vnc_espbuffsend: cannot alloc tx buffer\n");
     return -128;
   }
 
@@ -111,7 +131,7 @@ overflow:
     // we've already been overflowing
     if (system_get_time() - conn->txoverflow_at > 10*1000*1000) {
       // no progress in 10 seconds, kill the connection
-      os_printf("vncbridge: killing overlowing stuck conn %p\n", conn);
+      os_printf("vncbridge: killing overflowing stuck conn %p\n", conn);
       espconn_disconnect(conn->conn);
     }
     // else be silent, we already printed an error
@@ -132,7 +152,9 @@ espbuffsend_static(vncbridgeConnData *conn, const char *data, uint16 len) {
   }
   
   os_memcpy(buff, data, len);
-  return espbuffsend(conn, buff, len);
+  sint8 ret = espbuffsend(conn, buff, len);
+  os_free(buff);
+  return ret;
 }
 
 //callback after the data are sent
@@ -140,40 +162,13 @@ static void ICACHE_FLASH_ATTR
 vncbridgeSentCb(void *arg)
 {
   vncbridgeConnData *conn = ((struct espconn*)arg)->reverse;
-  //os_printf("Sent CB %p\n", conn);
+  //DBG("Sent CB %p\n", conn);
   if (conn == NULL) return;
-  //os_printf("%d ST\n", system_get_time());
   if (conn->sentbuffer != NULL) os_free(conn->sentbuffer);
   conn->sentbuffer = NULL;
   conn->readytosend = true;
   conn->txoverflow_at = 0;
   sendtxbuffer(conn); // send possible new data in txbuffer
-}
-
-/*
-void ICACHE_FLASH_ATTR
-console_process(char *buf, short len)
-{
-  // push the buffer into each open connection
-  for (short i=0; i<VNC_MAX_CONN; i++) {
-    if (connData[i].conn) {
-      espbuffsend(&connData[i], buf, len);
-    }
-  }
-}
-*/
-
-// callback with a buffer of characters that have arrived on the uart
-void ICACHE_FLASH_ATTR
-vncbridgeUartCb(char *buf, short length)
-{
-  //os_printf("SLIP: disabled got %d\n", length);
-  // Discard responses from the UART
-  // theoretically, we could send a screen update with e.g. a changing colour
-  // but that is not currently working! :-)
-
-  // console_process(buf, length);
-
 }
 
 //===== Connect / disconnect
@@ -184,15 +179,21 @@ vncbridgeDisconCb(void *arg)
 {
   vncbridgeConnData *conn = ((struct espconn*)arg)->reverse;
   if (conn == NULL) return;
+  DBG("Closing connection\n");
   // Free buffers
   if (conn->sentbuffer != NULL) os_free(conn->sentbuffer);
   conn->sentbuffer = NULL;
   if (conn->txbuffer != NULL) os_free(conn->txbuffer);
   conn->txbuffer = NULL;
   conn->txbufferlen = 0;
-  if (conn->rxbuffer != NULL) os_free(conn->rxbuffer);
-  conn->rxbuffer = NULL;
-  conn->rxbufferlen = 0;
+  if (conn->rxbuffer != NULL && conn->rxbufferlen == 0) {
+    DBG("VNC Freed RX buffer\n");
+    os_free(conn->rxbuffer);
+    DBG("VncDisc: RX at %p\n", conn->rxbuffer);
+    conn->rxbuffer = NULL;
+  } else {
+    DBG("VNC RX buffer still has data, leaving it\n");
+  }
   conn->conn = NULL;
 }
 
@@ -210,16 +211,20 @@ static void ICACHE_FLASH_ATTR
 vncbridgeRecvCb(void *arg, char *data, unsigned short len)
 {
   vncbridgeConnData *conn = ((struct espconn*)arg)->reverse;
-  //os_printf("Receive callback on conn %p\n", conn);
   if (conn == NULL) return;
-
-  if (!vnc_proto_handler(conn, data, len)) {
-    //close connection
+  if (conn->rxbufferlen + len > MAX_RXBUFFER) {
+    os_printf("RX buffer overrun!\n");
     espconn_disconnect(conn->conn);
-  } else {
-    // syslog(SYSLOG_FAC_USER, SYSLOG_PRIO_NOTICE, "esp-link", "vncbridgeRecvCb, waiting for more data\n");
+    return;
   }
+  sint8_t res = espconn_recv_hold(conn->conn);
+  if (res != 0) os_printf("Hold: %d\n", res);
+  os_memcpy(conn->rxbuffer+conn->rxbufferlen, data, len);
+  conn->rxbufferlen += len;
+  // DBG("RX += %d, now %d\n", len, conn->rxbufferlen);
+  post_usr_task(deferredTaskNum, 0);
 }
+
 
 // New connection callback, use one of the connection descriptors, if we have one left.
 static void ICACHE_FLASH_ATTR
@@ -228,24 +233,27 @@ vncbridgeConnectCb(void *arg)
   struct espconn *conn = arg;
   // Find empty conndata in pool
   int i;
-  for (i=0; i<VNC_MAX_CONN; i++) if (connData[i].conn==NULL) break;
-#ifdef VNCBR_DBG
-  os_printf("Accept port %d, conn=%p, pool slot %d\n", conn->proto.tcp->local_port, conn, i);
-#endif
-  syslog(SYSLOG_FAC_USER, SYSLOG_PRIO_NOTICE, "esp-link", "Accept port %d, conn=%p, pool slot %d\n", conn->proto.tcp->local_port, conn, i);
+  for (i=0; i<VNC_MAX_CONN; i++) if (vncConnData[i].conn==NULL) break;
+  DBG("Accept port %d, conn=%p, pool slot %d\n", conn->proto.tcp->local_port, conn, i);
   if (i==VNC_MAX_CONN) {
-#ifdef VNCBR_DBG
     os_printf("Aiee, conn pool overflow!\n");
-#endif
-	syslog(SYSLOG_FAC_USER, SYSLOG_PRIO_WARNING, "esp-link", "Aiee, conn pool overflow!\n");
     espconn_disconnect(conn);
     return;
   }
 
-  os_memset(connData+i, 0, sizeof(struct vncbridgeConnData));
-  connData[i].conn = conn;
-  conn->reverse = connData+i;
-  connData[i].readytosend = true;
+  os_memset(vncConnData+i, 0, sizeof(struct vncbridgeConnData));
+  vncConnData[i].conn = conn;
+  conn->reverse = vncConnData+i;
+  vncConnData[i].readytosend = true;
+
+  // allocate the rx buffer
+  vncConnData[i].rxbuffer = os_zalloc(MAX_RXBUFFER);
+  vncConnData[i].rxbufferlen = 0;
+  if (vncConnData[i].rxbuffer == NULL) {
+    os_printf("Out of memory for RX buffer\n");
+    espconn_disconnect(conn);
+    return;
+  }
 
   espconn_regist_recvcb(conn, vncbridgeRecvCb);
   espconn_regist_disconcb(conn, vncbridgeDisconCb);
@@ -253,8 +261,8 @@ vncbridgeConnectCb(void *arg)
   espconn_regist_sentcb(conn, vncbridgeSentCb);
 
   espconn_set_opt(conn, ESPCONN_REUSEADDR|ESPCONN_NODELAY);
-  espbuffsend_static(&connData[i], RFB_HELLO, sizeof(RFB_HELLO));
-  connData[i].state = CLIENT_HELLO;
+  espbuffsend_static(&vncConnData[i], RFB_HELLO, sizeof(RFB_HELLO));
+  vncConnData[i].state = CLIENT_HELLO;
 }
 
 // Internal functions
@@ -270,8 +278,34 @@ getModifier(uint32 key) {
   case 0xFFE2u: return 1 << 5; // right shift;
   case 0xFF7Eu: return 1 << 6; // right alt
   case 0xFFEBu: return 1 << 7; // right gui
-  default: return 0;
+  case 0x21: // Keyboard 1 and !
+  case 0x40: // Keyboard 2 and @
+  case 0x23: // Keyboard 3 and #
+  case 0x24: // Keyboard 4 and $
+  case 0x25: // Keyboard 5 and %
+  case 0x5E: // Keyboard 6 and ^
+  case 0x26: // Keyboard 7 and &
+  case 0x2A: // Keyboard 8 and *
+  case 0x28: // Keyboard 9 and (
+  case 0x29: // Keyboard 0 and )
+  case 0x5F: // Keyboard - and (underscore)
+  case 0x2B: // Keyboard = and +
+  case 0x7B: // Keyboard [ and {
+  case 0x7D: // Keyboard ] and }
+  case 0x7C: // Keyboard \ and |
+  // case unknown: // Keyboard Non-US # and ~
+  case 0x3A: // Keyboard ; and :
+  case 0x22: // Keyboard ' and "
+  case 0x7E: // Keyboard Grave Accent and Tilde
+  case 0x3C: // Keyboard, and <
+  case 0x3E: // Keyboard . and >
+  case 0x3F: // Keyboard / and ?
+    return 1 << 1; // left shift
+  default: 
+    if (key != tolower(key))
+      return 1 << 1; // left shift
   }
+  return 0;
 }
 
 static uint8_t ICACHE_FLASH_ATTR
@@ -453,7 +487,7 @@ mapKey(uint32 key) {
   }
 }
 
-static void ICACHE_FLASH_ATTR
+static bool ICACHE_FLASH_ATTR
 emitKeyEvent(bool pressed, uint32 key) {
   static uint8_t keys[7];
   uint8_t newKeys[7];
@@ -463,16 +497,15 @@ emitKeyEvent(bool pressed, uint32 key) {
   if (modifier != 0) {
     if (pressed) {
       newKeys[0] |= modifier;
-      if ((newKeys[0] & (1<<1 | 1<<5)) != 0) // left-shift && right-shift
+      if ((newKeys[0] & (1<<1 | 1<<5)) == (1<<1 | 1<<5)) // left-shift && right-shift
       // reset key state
-      memset(newKeys, 0, sizeof(newKeys));
+        memset(newKeys, 0, sizeof(newKeys));
     } else
       newKeys[0] &= ~modifier;
   }
 
   uint8_t mapkey = mapKey(key);
-  // syslog(SYSLOG_FAC_USER, SYSLOG_PRIO_NOTICE, "esp-link", "KeyEvent: modifiers: 0x%X, key: 0x%X => 0x%X, pressed=%d\n", modifier, key, mapkey, pressed);
-  // os_printf("KeyEvent: modifiers: 0x%X, key: 0x%X => 0x%X, pressed=%d\n", modifier, key, mapkey, pressed);
+  // DBG("KE: m: 0x%X, 0x%X => 0x%X, %s\n", modifier, key, mapkey, pressed ? "down" : "up");
   if (pressed) {
     bool found = false;
     for (int i = 1; i < 7; i++)
@@ -492,18 +525,18 @@ emitKeyEvent(bool pressed, uint32 key) {
   }
 
   if (memcmp(keys, newKeys, sizeof(keys)) != 0) {
-    // write to the uart
-    tlv_send(KEYSTROKE_CHANNEL, (char *) newKeys, 7);
-//    static char data[33];
-//    int len = os_sprintf(data, "K %d %d %d %d %d %d %d\r\n", newKeys[0], newKeys[1], newKeys[2], newKeys[3], newKeys[4], newKeys[5], newKeys[6]);
-//    uart0_tx_buffer(data, len);
+    // FIXME: For performance, we only send 2 bytes, modifier and key
+    // as a result, we cannot do n-key rollover
+    if (tlv_send(TLV_HID, (char *) newKeys, 2) != 0)
+      return false;
     os_memcpy(keys, newKeys, sizeof(keys));
   }
+  return true;
 }
 
 static int8_t pointer_event[] = {0, -1, -1, 0};
 
-static void ICACHE_FLASH_ATTR
+static bool ICACHE_FLASH_ATTR
 emitPointerEvent(int mask, int x, int y, int z) {
   static int old_x = -1, old_y = -1;
   
@@ -513,76 +546,44 @@ emitPointerEvent(int mask, int x, int y, int z) {
     pointer_event[1] = x - old_x;
     pointer_event[2] = y - old_y;
     pointer_event[3] = z;
-    tlv_send(POINTER_CHANNEL, (char *) pointer_event, 4);
-
-//    static char data[15];
-//    int len = os_sprintf(data, "M %d %d %d %d\n", mask, x - old_x, y - old_y, 0);
-//    uart0_tx_buffer(data, len);
+    if (tlv_send(TLV_HID, (char *) pointer_event, 4) != 0)
+      return false;
   }
   old_x = x;
   old_y = y;
+  return true;
 }
 
 int8 ICACHE_FLASH_ATTR
-vnc_proto_handler(vncbridgeConnData *conn, char *data, unsigned short len) {
-  // syslog(SYSLOG_FAC_USER, SYSLOG_PRIO_NOTICE, "esp-link", "Received Client data, len %d\n", len);
-  if (conn->rxbuffer == NULL) {
-    conn->rxbuffer = os_zalloc(MAX_RXBUFFER);
-    // os_printf("Allocated RX Buffer\r\nHeap: %ld\n", (unsigned long)system_get_free_heap_size());
-  }
-
-  while (len > 0 || conn->rxbufferlen > 0) {
-    // add to receive buffer
-    if (len > 0) {
-      uint16_t avail = conn->rxbufferlen+len > MAX_RXBUFFER ? MAX_RXBUFFER-conn->rxbufferlen : len;
-      os_memcpy(conn->rxbuffer + conn->rxbufferlen, data, avail);
-      conn->rxbufferlen += avail;
-      data += avail;
-      len -= avail;
-      // syslog(SYSLOG_FAC_USER, SYSLOG_PRIO_NOTICE, "esp-link", "Client RX buffer size is now %d, state is %d\n", conn->rxbufferlen, conn->state);
-      // os_printf("Client RX buffer size is now %d, state is %d\n", conn->rxbufferlen, conn->state);
-    }
-
+vnc_proto_handler(vncbridgeConnData *conn) {
+  while (conn->rxbufferlen > 0) {
     uint16 consume = 0;
     switch (conn->state) {
     case CLIENT_HELLO:
       if (conn->rxbufferlen < 12)
         return true; // need more input
-      // syslog(SYSLOG_FAC_USER, SYSLOG_PRIO_NOTICE, "esp-link", "Received client hello\n");
-#ifdef VNCBR_DBG
-      // os_printf("Received client hello\n");
-#endif
+      // DBG("Received client hello\n");
 
       espbuffsend_static(conn, AUTH_CHALLENGE, sizeof(AUTH_CHALLENGE));
-      // syslog(SYSLOG_FAC_USER, SYSLOG_PRIO_NOTICE, "esp-link", "Sent auth challenge\n");
-#ifdef VNCBR_DBG
-      // os_printf("Sent auth challenge\n");
-#endif
+      // DBG("Sent auth challenge\n");
       conn->state = CLIENT_AUTH;
       consume = 12;
       break;
     case CLIENT_AUTH:
       if (conn->rxbufferlen < 16)
         return true; // need more input
-      // syslog(SYSLOG_FAC_USER, SYSLOG_PRIO_NOTICE, "esp-link", "Received Client_auth\n");
-#ifdef VNCBR_DBG
-      // os_printf("Received Client_auth\n");
-#endif
+      // DBG("Received Client_auth\n");
       bool authSuccessful = true;
       for (int i = 0; i < 16; i++) {
         if (conn->rxbuffer[i] != AUTH_RESPONSE[i]) {
           authSuccessful = false;
         }
       }
-      // syslog(SYSLOG_FAC_USER, SYSLOG_PRIO_NOTICE, "esp-link", "Client auth %d\n", authSuccessful);
-#ifdef VNCBR_DBG
-      // os_printf("Client auth %d\n", authSuccessful);
-#endif
+      // DBG("Client auth %d\n", authSuccessful);
       
       consume = 16;
       if (authSuccessful) {
-        // syslog(SYSLOG_FAC_USER, SYSLOG_PRIO_NOTICE, "esp-link", "Client auth successful\n");
-        // os_printf("Client auth successful\n");
+        // DBG("Client auth successful\n");
         espbuffsend_static(conn, AUTH_OK, sizeof(AUTH_OK)); // authOK
         conn->state = CLIENT_INIT;
         break;
@@ -591,26 +592,22 @@ vnc_proto_handler(vncbridgeConnData *conn, char *data, unsigned short len) {
         return false;
       }
     case CLIENT_INIT:
-      // syslog(SYSLOG_FAC_USER, SYSLOG_PRIO_NOTICE, "esp-link", "Client init, sending INIT_MESSAGE\n", authSuccessful, sizeof(AUTH_OK));
-      // os_printf("Client init, sending INIT_MESSAGE\n");
+      // DBG("Client init, sending INIT_MESSAGE\n");
       consume = 1;
       espbuffsend_static(conn, INIT_MESSAGE, sizeof(INIT_MESSAGE));
       conn->state = RFB_MESSAGE;
       break;
     case RFB_MESSAGE:
-      // syslog(SYSLOG_FAC_USER, SYSLOG_PRIO_NOTICE, "esp-link", "RFB_MESSAGE, subtype 0x%x\n", conn->rxbuffer[1]);
       switch (conn->rxbuffer[0]) {
         case SetPixelFormat:
-          // syslog(SYSLOG_FAC_USER, SYSLOG_PRIO_NOTICE, "esp-link", "SetPixelFormat\n");
-          // os_printf("SetPixelFormat\r\n");
+          // DBG("SetPixelFormat\r\n");
           if (conn->rxbufferlen < 20)
             return true;
           // discard the request
           consume = 20;
           break;
        case FixColourMapEntries:
-          // syslog(SYSLOG_FAC_USER, SYSLOG_PRIO_NOTICE, "esp-link", "FixColorMapEntries\n");
-          // os_printf("FixColorMapEntries\n");
+          // DBG("FixColorMapEntries\n");
           if (conn->rxbufferlen < 6)
             return true;
           int entries = conn->rxbuffer[4] << 8 | conn->rxbuffer[5];
@@ -619,8 +616,7 @@ vnc_proto_handler(vncbridgeConnData *conn, char *data, unsigned short len) {
           consume = 6 + 6 * entries;
           break;
         case SetEncodings:
-          // syslog(SYSLOG_FAC_USER, SYSLOG_PRIO_NOTICE, "esp-link", "SetEncodings\n");
-          // os_printf("SetEncodings\n");
+          // DBG("SetEncodings\n");
           if (conn->rxbufferlen < 4)
             return true;
           int nCodings = conn->rxbuffer[2] << 8 | conn->rxbuffer[3];
@@ -629,36 +625,34 @@ vnc_proto_handler(vncbridgeConnData *conn, char *data, unsigned short len) {
           consume = 4 + nCodings * 4;
           break;
         case FrameBufferUpdateRequest:
-          // syslog(SYSLOG_FAC_USER, SYSLOG_PRIO_NOTICE, "esp-link", "FramebufferUpdateRequest\n");
-          // os_printf("FramebufferUpdateRequest\n");
+          // DBG("FramebufferUpdateRequest\n");
           if (conn->rxbufferlen < 10)
             return true;
           consume = 10;
           // we don't respond to these
           break;
         case KeyEvent:
-          // syslog(SYSLOG_FAC_USER, SYSLOG_PRIO_NOTICE, "esp-link", "KeyEvent\n");
-          // os_printf("KeyEvent\n");
+          // DBG("KeyEvent\n");
           if (conn->rxbufferlen < 8)
             return true;
           consume = 8;
           bool pressed = conn->rxbuffer[1] == 1;
           uint32 key = ((uint32) (conn->rxbuffer[4] << 24)) | (conn->rxbuffer[5] << 16) | (conn->rxbuffer[6] << 8) | (conn->rxbuffer[7]);
-          emitKeyEvent(pressed, key);
+          if (!emitKeyEvent(pressed, key))
+            return true;
           break;
         case PointerEvent:
-          // syslog(SYSLOG_FAC_USER, SYSLOG_PRIO_NOTICE, "esp-link", "PointerEvent\n");
-          // os_printf("PointerEvent\n");
+          // DBG("PointerEvent\n");
           if (conn->rxbufferlen < 6)
             return true;
           consume = 6;
           uint8 mask = conn->rxbuffer[1];
           int32 x = conn->rxbuffer[2] << 8 | conn->rxbuffer[3];
           int32 y = conn->rxbuffer[4] << 8 | conn->rxbuffer[5];
-          emitPointerEvent(mask, x, y, 0);
+          if (!emitPointerEvent(mask, x, y, 0))
+            return true;
           break;
         case ClientCutText:
-          // syslog(SYSLOG_FAC_USER, SYSLOG_PRIO_NOTICE, "esp-link", "ClientCutText\n");
           if (conn->rxbufferlen < 8)
             return true;
           consume = 8;
@@ -681,14 +675,22 @@ vnc_proto_handler(vncbridgeConnData *conn, char *data, unsigned short len) {
     if (consume > 0) {
       os_memcpy(conn->rxbuffer, conn->rxbuffer + consume, conn->rxbufferlen - consume);
       conn->rxbufferlen -= consume;
-      // os_printf("consumed 0x%X, 0x%X remain, starting at 0x%p\n", consume, conn->rxbufferlen, conn->rxbuffer);
-      // os_printf("Heap: %ld\n", (unsigned long)system_get_free_heap_size());
-      // syslog(SYSLOG_FAC_USER, SYSLOG_PRIO_NOTICE, "esp-link", "consumed %d, %d remain, starting at %p\n", consume, conn->rxbufferlen, conn->rxbuffer);
+      // DBG("consumed 0x%X, 0x%X remain\n", consume, conn->rxbufferlen);
     }
   }
   return true;
 }
 
+static void ICACHE_FLASH_ATTR
+vncProcessRX(vncbridgeConnData *conn) {
+  if (!vnc_proto_handler(conn)) {
+    // discard any pending data
+    conn->rxbufferlen = 0;
+    //close connection
+    DBG("proto says to close connection!\n");
+    espconn_disconnect(conn->conn);
+  }
+}
 
 //===== Initialization
 
@@ -704,13 +706,51 @@ vncbridgeInitPins()
 
 }
 
+int8_t ICACHE_FLASH_ATTR
+vncTlvCb(tlv_data_t *tlv_data) {
+
+  if (tlv_data != NULL) {
+    // do something with it
+  }
+
+  return 0;
+}
+
+static void ICACHE_FLASH_ATTR
+deferredTask(os_event_t *events)
+{
+  bool more = false;
+  // look for any residual data in the rx buffers
+  uint8_t c;
+  for (c=0; c<VNC_MAX_CONN; c++) {
+    DBG_RATE(1000*1000, "Task %d : %d rx bytes\n", c, vncConnData[c].rxbufferlen);
+    if (vncConnData[c].rxbufferlen > 0) {
+      vncProcessRX(&vncConnData[c]);
+      DBG_RATE(1000*1000, "Heap: %ld\n", (unsigned long) system_get_free_heap_size());
+    }
+    if (vncConnData[c].conn != NULL && vncConnData[c].rxbufferlen < 32) {
+      espconn_recv_unhold(vncConnData[c].conn);
+    } else if (vncConnData[c].conn == NULL && vncConnData[c].rxbuffer != NULL && vncConnData[c].rxbufferlen == 0) {
+      DBG("Freed RX buffer\n");
+      os_free(vncConnData[c].rxbuffer);
+      DBG("VncDefr: RX at %p\n", vncConnData[c].rxbuffer);
+      vncConnData[c].rxbuffer = NULL;
+      vncConnData[c].rxbufferlen = 0;
+    }
+    if (vncConnData[c].rxbufferlen > 0)
+      more = true;
+  }
+  if (more) // data awaits, schedule it ourselves
+    post_usr_task(deferredTaskNum, 0);
+}
+
 // Start vnc bridge TCP server on specified port (typ. 5900)
 void ICACHE_FLASH_ATTR
 vncbridgeInit(int port)
 {
   vncbridgeInitPins();
 
-  os_memset(connData, 0, sizeof(connData));
+  os_memset(vncConnData, 0, sizeof(vncConnData));
   os_memset(&vncbridgeTcp, 0, sizeof(vncbridgeTcp));
 
   // set-up the primary port for plain bridging
@@ -724,4 +764,7 @@ vncbridgeInit(int port)
   espconn_tcp_set_max_con_allow(&vncbridgeConn, VNC_MAX_CONN);
   espconn_regist_time(&vncbridgeConn, VNC_BRIDGE_TIMEOUT, 0);
 
+  tlv_register_channel_handler(TLV_HID, vncTlvCb);
+
+  deferredTaskNum = register_usr_task(deferredTask);
 }

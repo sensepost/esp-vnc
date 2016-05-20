@@ -2,7 +2,12 @@
 #include "cgiwifi.h"
 #include "cgi.h"
 #include "config.h"
+#ifdef SYSLOG
 #include "syslog.h"
+#else
+#define syslog(a,...)
+#define syslog_init(a)
+#endif
 #include "sntp.h"
 #include "cgimqtt.h"
 

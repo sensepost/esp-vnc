@@ -12,7 +12,7 @@ FlashConfig flashDefault = {
   .seq = 33, .magic = 0, .crc = 0,
   .reset_pin    = MCU_RESET_PIN, .isp_pin = MCU_ISP_PIN,
   .conn_led_pin = LED_CONN_PIN, .ser_led_pin = LED_SERIAL_PIN,
-  .baud_rate    = 78440,
+  .baud_rate    = 74880,
   .hostname     = "esp-link\0",
   .staticip     = 0,
   .netmask      = 0x00ffffff,

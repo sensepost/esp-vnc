@@ -10,6 +10,10 @@ typedef void (*UartRecv_cb)(char *buf, short len);
 // calls use uart1 for output (for debugging purposes)
 void uart_init(UartBautRate uart0_br, UartBautRate uart1_br);
 
+// returns the number of characters pending in the UART0 tx fifo
+uint8_t ICACHE_FLASH_ATTR
+uart0_tx_fifo_length(void);
+
 // Transmit a buffer of characters on UART0
 void uart0_tx_buffer(char *buf, uint16 len);
 

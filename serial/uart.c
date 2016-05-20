@@ -21,6 +21,7 @@
 #include "task.h"
 #include "uart.h"
 
+#define UART_DBG
 #ifdef UART_DBG
 #define DBG_UART(format, ...) os_printf(format, ## __VA_ARGS__)
 #else
@@ -95,6 +96,12 @@ uart_config(uint8 uart_no)
 
   //clear all interrupt
   WRITE_PERI_REG(UART_INT_CLR(uart_no), 0xffff);
+}
+
+uint8_t ICACHE_FLASH_ATTR
+uart0_tx_fifo_length()
+{
+  return ((READ_PERI_REG(UART_STATUS(UART0))>>UART_TXFIFO_CNT_S)&UART_TXFIFO_CNT);
 }
 
 /******************************************************************************
@@ -226,7 +233,7 @@ uart_recvTask(os_event_t *events)
            (length < 128)) {
       buf[length++] = READ_PERI_REG(UART_FIFO(UART0)) & 0xFF;
     }
-    //DBG_UART("%d ix %d\n", system_get_time(), length);
+    // DBG_UART("RX CB %d\n", length);
 
     for (int i=0; i<MAX_CB; i++) {
       if (uart_recv_cb[i] != NULL) (uart_recv_cb[i])(buf, length);

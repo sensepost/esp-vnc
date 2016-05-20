@@ -85,7 +85,7 @@ LED_SERIAL_PIN      ?= 14
 
 # Optional Modules mqtt
 # MODULES ?= mqtt rest
-MODULES ?= syslog
+# MODULES ?= syslog
 
 # --------------- esphttpd config options ---------------
 
@@ -214,7 +214,7 @@ EXTRA_INCDIR 	= include .
 LIBS = c gcc hal phy pp net80211 wpa main lwip crypto
 
 # compiler flags using during compilation of source files
-CFLAGS	+= -Os -ggdb -std=c99 -Werror -Wpointer-arith -Wundef -Wall -Wl,-EL -fno-inline-functions \
+CFLAGS	+= -Os -ggdb -std=c99 -Wpointer-arith -Wundef -Wall -Wl,-EL -fno-inline-functions \
 		-nostdlib -mlongcalls -mtext-section-literals -ffunction-sections -fdata-sections \
 		-D__ets__ -DICACHE_FLASH -D_STDINT_H -Wno-address -DFIRMWARE_SIZE=$(ESP_FLASH_MAX) \
 		-DMCU_RESET_PIN=$(MCU_RESET_PIN) -DMCU_ISP_PIN=$(MCU_ISP_PIN) \
@@ -278,7 +278,8 @@ CFLAGS		+= -DSTA_SSID="$(STA_SSID)"
 endif
 
 ifneq ($(strip $(STA_PASS)),)
-CFLAGS		+= -DSTA_PASS="$(STA_PASS)"
+CFLAGS		+= -DSTA_PASS='$(STA_PASS)'
+$(info STA_PASS=$(STA_PASS))
 endif
 
 ifneq ($(strip $(AP_SSID)),)

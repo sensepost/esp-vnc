@@ -94,8 +94,8 @@ int ICACHE_FLASH_ATTR cgiPinsSet(HttpdConnData *connData) {
 	reset, isp, conn, ser, swap, rxpup);
 
     // apply the changes
-    serbridgeInitPins();
-    serledInit();
+    // serbridgeInitPins();
+    // serledInit();
     statusInit();
 
     // save to flash

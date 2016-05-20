@@ -8,10 +8,6 @@
 #define VNC_MAX_CONN 1
 #define VNC_BRIDGE_TIMEOUT 300 // 300 seconds = 5 minutes
 
-// Send buffer size
-#define MAX_TXBUFFER (2*1460)
-#define MAX_RXBUFFER (2*1460)
-
 typedef enum {
   CLIENT_HELLO, // client has connected, we expect a hello
   CLIENT_AUTH,  // challenge sent, await auth
@@ -34,6 +30,7 @@ typedef struct vncbridgeConnData {
   struct espconn *conn;
   uint16         rxbufferlen;   // length of data in rxbuffer
   char           *rxbuffer;     // buffer for received data
+  bool		 recv_hold;     // is the connection on hold
   VncState       state;         // the next message to be processed
   uint32         cut_text;      // how much data to be read in cut_text state
   uint16         txbufferlen;   // length of data in txbuffer
@@ -47,6 +44,6 @@ void ICACHE_FLASH_ATTR vncbridgeInit(int port);
 void ICACHE_FLASH_ATTR vncbridgeInitPins(void);
 void ICACHE_FLASH_ATTR vncbridgeUartCb(char *buf, short len);
 void ICACHE_FLASH_ATTR vncbridgeReset();
-int8 ICACHE_FLASH_ATTR vnc_proto_handler(vncbridgeConnData *conn, char *data, unsigned short len);
+// int8 ICACHE_FLASH_ATTR vnc_proto_handler(vncbridgeConnData *conn, char *data, unsigned short len);
 
 #endif /* __VNC_BRIDGE_H__ */

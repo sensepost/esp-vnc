@@ -18,7 +18,7 @@
 #include "cgitcp.h"
 #include "cgimqtt.h"
 #include "cgiflash.h"
-#include "cgioptiboot.h"
+// #include "cgioptiboot.h"
 #include "auth.h"
 #include "espfs.h"
 #include "uart.h"
@@ -31,7 +31,12 @@
 #include "config.h"
 #include "log.h"
 #include "gpio.h"
+#ifdef SYSLOG
 #include "syslog.h"
+#else
+#define syslog(a,...)
+#define LOG_NOTICE(a,...)
+#endif
 #include "cgiservices.h"
 
 #define NOTICE(format, ...) do {	                                          \
@@ -55,8 +60,8 @@ HttpdBuiltInUrl builtInUrls[] = {
   { "/flash/next", cgiGetFirmwareNext, NULL },
   { "/flash/upload", cgiUploadFirmware, NULL },
   { "/flash/reboot", cgiRebootFirmware, NULL },
-  { "/pgm/sync", cgiOptibootSync, NULL },
-  { "/pgm/upload", cgiOptibootData, NULL },
+  // { "/pgm/sync", cgiOptibootSync, NULL },
+  // { "/pgm/upload", cgiOptibootData, NULL },
   { "/log/text", ajaxLog, NULL },
   { "/log/dbg", ajaxLogDbg, NULL },
   { "/log/reset", cgiReset, NULL },
@@ -137,7 +142,7 @@ void user_init(void) {
   // mount the http handlers
   httpdInit(builtInUrls, 80);
   // init the wifi-serial transparent bridge (port 23)
-//  serbridgeInit(23, 2323);
+  serbridgeInit(23);
   vncbridgeInit(5900);
 //  uart_add_recv_cb(&serbridgeUartCb);
   uart_add_recv_cb(&tlvUartCb);
@@ -167,4 +172,5 @@ void user_init(void) {
   NOTICE("initializing user application");
   app_init();
   NOTICE("Waiting for work to do...");
+  uart0_tx_buffer("d41d8cd98f00b204e9800998ecf8427e", 32);
 }

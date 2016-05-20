@@ -7,6 +7,7 @@
 #include "serbridge.h"
 #include "config.h"
 #include "console.h"
+#include "tlv.h"
 
 // Microcontroller console capturing the last 1024 characters received on the uart so
 // they can be shown on a web page
@@ -54,7 +55,7 @@ ajaxConsoleReset(HttpdConnData *connData) {
   if (connData->conn==NULL) return HTTPD_CGI_DONE; // Connection aborted. Clean up.
   jsonHeader(connData, 200);
   console_rd = console_wr = console_pos = 0;
-  serbridgeReset();
+  // serbridgeReset();
   return HTTPD_CGI_DONE;
 }
 
@@ -89,8 +90,8 @@ ajaxConsoleSend(HttpdConnData *connData) {
   
   // figure out where to start in buffer based on URI param
   len = httpdFindArg(connData->getArgs, "text", buff, sizeof(buff));
-  if (len > 0) {
-    uart0_tx_buffer(buff, len);
+  if (len > 0 && len < TLV_MAX_PACKET) {
+    tlv_send(TLV_GENERIC, buff, len);
     status = 200;
   }
   
