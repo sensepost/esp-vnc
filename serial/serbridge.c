@@ -62,6 +62,12 @@ deferredTask(os_event_t *events)
     }
     if (connData[c].conn != NULL && connData[c].rxbufferlen < 32) {
       espconn_recv_unhold(connData[c].conn);
+    } else if (connData[c].conn == NULL && connData[c].rxbuffer != NULL && connData[c].rxbufferlen == 0) {
+      DBG("Freed RX buffer\n");
+      os_free(connData[c].rxbuffer);
+      DBG("Defr: RX at %p\n", connData[c].rxbuffer);
+      connData[c].rxbuffer = NULL;
+      connData[c].rxbufferlen = 0;
     }
     if (connData[c].rxbufferlen > 0)
       more = true;
@@ -221,11 +227,11 @@ serbridgeDisconCb(void *arg)
 
   if (conn->rxbuffer != NULL) os_free(conn->rxbuffer);
   DBG("SerDisc: RX at %p\n", conn->rxbuffer);
-  conn->rxbuffer = NULL;
-  conn->rxbufferlen = 0;
+  // conn->rxbuffer = NULL;
+  // conn->rxbufferlen = 0;
 
   conn->conn = NULL;
-  char inactive[] = { 1, TLV_GENERIC };
+  char inactive[] = { 2, TLV_GENERIC };
   tlv_send(0, inactive, 2);
   DBG("SER connection closed, all buffers freed\n");
 }
