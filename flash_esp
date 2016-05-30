@@ -1,0 +1,33 @@
+#!/bin/sh
+
+ESPDIR=`dirname $0`
+ESPTOOL=${ESPDIR}/esptool/esptool.py
+
+HEX="$1"
+
+# this device pattern works OK on Linux and OS X, but watch out
+# if you have any additional USB Serial devices connected
+DEVICEPATTERN="/dev/cu.usbmodem* /dev/ttyACM*"
+
+DEVICE=`ls ${DEVICEPATTERN} 2> /dev/null`
+
+if [ -z "$DEVICE" ] ; then
+	printf "No device found, waiting for it to show up"
+	while [ -z "$DEVICE" ] ; do
+		sleep 1
+		printf "."
+		DEVICE=`ls ${DEVICEPATTERN} 2> /dev/null`
+	done
+fi
+
+
+# this version only overwrites the app, but not the bootloader or configuration
+# ${ESPTOOL} --port $DEVICE --baud 230400 write_flash -fs 4m -ff 40m 0x00000 $1
+
+# This version creates a completely fresh device, with all relevant 
+# parts of the flash initialised.
+# This ends up overwriting any saved configuration, so only do this 
+# if you have the configuration embedded in the app already, or plan 
+# to manually configure it afterwards
+${ESPTOOL} --port $DEVICE --baud 230400 write_flash -fs 4m -ff 40m 0x00000 ${ESPDIR}/esp_iot_sdk_v1.5.1/bin/boot_v1.5.bin 0x1000 ${HEX} 0x7E000 ${ESPDIR}/esp_iot_sdk_v1.5.1/bin/blank.bin
+
