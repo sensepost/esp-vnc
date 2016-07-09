@@ -279,7 +279,6 @@ endif
 
 ifneq ($(strip $(STA_PASS)),)
 CFLAGS		+= -DSTA_PASS='$(STA_PASS)'
-$(info STA_PASS=$(STA_PASS))
 endif
 
 ifneq ($(strip $(AP_SSID)),)

@@ -41,7 +41,7 @@ serbridgeProcessRX(serbridgeConnData *conn)
 
   if (conn->rxbuffer != NULL && conn->rxbufferlen > 0) {
     uint8_t len = conn->rxbufferlen > TLV_MAX_PACKET ? TLV_MAX_PACKET : conn->rxbufferlen;
-    if (tlv_send(TLV_GENERIC, conn->rxbuffer, len) == 0) {
+    if (tlv_send(TLV_PIPE, conn->rxbuffer, len) == 0) {
       os_memcpy(conn->rxbuffer, conn->rxbuffer+len, conn->rxbufferlen-len);
       conn->rxbufferlen -= len;
     }
@@ -231,8 +231,8 @@ serbridgeDisconCb(void *arg)
   // conn->rxbufferlen = 0;
 
   conn->conn = NULL;
-  char inactive[] = { 2, TLV_GENERIC };
-  tlv_send(0, inactive, 2);
+  char inactive[] = { 2, TLV_PIPE };
+  tlv_send(TLV_CONTROL, inactive, 2);
   DBG("SER connection closed, all buffers freed\n");
 }
 
@@ -287,23 +287,28 @@ serbridgeConnectCb(void *arg)
   espconn_regist_sentcb(conn, serbridgeSentCb);
 
   espconn_set_opt(conn, ESPCONN_REUSEADDR|ESPCONN_NODELAY);
-  char active[] = { 1, TLV_GENERIC };
-  tlv_send(0, active, 2);
+  char active[] = { 1, TLV_PIPE };
+  tlv_send(TLV_CONTROL, active, 2);
 }
 
 int8_t ICACHE_FLASH_ATTR
 serTlvCb(tlv_data_t *tlv_data) {
-  if (tlv_data != NULL && tlv_data->channel == TLV_GENERIC) {
-    DBG("%d bytes received\n", tlv_data->length);
-    // log them to the console
-    // for (short i=0; i<tlv_data->length; i++)
-    //   console_write_char(tlv_data->data[i]);
+  if (tlv_data != NULL) {
+    if (tlv_data->channel == TLV_PIPE) {
+      DBG("%d bytes received\n", tlv_data->length);
+      // log them to the console
+      for (short i=0; i<tlv_data->length; i++)
+        console_write_char(tlv_data->data[i]);
 
-    for (short i=0; i<MAX_CONN; i++) {
-      if (connData[i].conn != NULL) {
-        DBG("Connection %d gets them!\n", i);
-        espbuffsend(&connData[i], (char *) tlv_data->data, tlv_data->length);
+      for (short i=0; i<MAX_CONN; i++) {
+        if (connData[i].conn != NULL) {
+          DBG("Connection %d gets them!\n", i);
+          espbuffsend(&connData[i], (char *) tlv_data->data, tlv_data->length);
+        }
       }
+    } else if (tlv_data->channel == TLV_DEBUG) {
+      for (short i=0; i<tlv_data->length; i++)
+        DBG("%c", tlv_data->data[i]);
     }
   }
 
@@ -328,7 +333,8 @@ serbridgeInit(int port)
   espconn_tcp_set_max_con_allow(&serbridgeConn1, MAX_CONN);
   espconn_regist_time(&serbridgeConn1, SER_BRIDGE_TIMEOUT, 0);
 
-  tlv_register_channel_handler(TLV_GENERIC, serTlvCb);
+  tlv_register_channel_handler(TLV_PIPE, serTlvCb);
+  tlv_register_channel_handler(TLV_DEBUG, serTlvCb);
 
   deferredTaskNum = register_usr_task(deferredTask);
 }

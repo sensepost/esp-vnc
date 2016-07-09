@@ -87,14 +87,14 @@ ajaxConsoleSend(HttpdConnData *connData) {
   if (connData->conn==NULL) return HTTPD_CGI_DONE; // Connection aborted. Clean up.
   char buff[2048];
   int len, status = 400;
-  
+
   // figure out where to start in buffer based on URI param
   len = httpdFindArg(connData->getArgs, "text", buff, sizeof(buff));
   if (len > 0 && len < TLV_MAX_PACKET) {
-    tlv_send(TLV_GENERIC, buff, len);
+    tlv_send(TLV_PIPE, buff, len);
     status = 200;
   }
-  
+
   jsonHeader(connData, status);
   return HTTPD_CGI_DONE;
 }
@@ -150,5 +150,3 @@ void ICACHE_FLASH_ATTR consoleInit() {
   console_wr = 0;
   console_rd = 0;
 }
-
-

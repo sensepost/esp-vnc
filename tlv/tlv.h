@@ -8,7 +8,8 @@
 
 #define TLV_CONTROL 0
 #define TLV_HID 1
-#define TLV_GENERIC 2
+#define TLV_PIPE 2
+#define TLV_DEBUG 3
 
 #define TLV_RESUME_FLOW 0
 
@@ -34,7 +35,7 @@ typedef int8_t (*tlv_receive_cb)(tlv_data_t *tlv_data);
  * -1 indicates that the uart has been blocked
  * -2 indicates that the channel has been blocked
  *
- * In the event of a blocked transmission, action should be taken to 
+ * In the event of a blocked transmission, action should be taken to
  * send the tlv at a later time, typically by posting a task using post_user_task
  **/
 int8_t ICACHE_FLASH_ATTR tlv_send(uint8_t channel, char *buf, uint8_t len);
