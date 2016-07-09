@@ -1,9 +1,19 @@
 #!/bin/sh
 
+
 ESPDIR=`dirname $0`
-ESPTOOL=${ESPDIR}/esptool/esptool.py
+ESPTOOL=${ESPDIR}/../esptool/esptool.py
+
+AVRDIR=${ESPDIR}/../avr
+AVRFLASH=${AVRDIR}/flash_avr
+ESP_PROG=${AVRDIR}/Program_ESP/Program_ESP.hex
 
 HEX="$1"
+AVRHEX="$2"
+
+${AVRFLASH} ${ESP_PROG}
+
+sleep 2
 
 # this device pattern works OK on Linux and OS X, but watch out
 # if you have any additional USB Serial devices connected
@@ -29,5 +39,10 @@ fi
 # This ends up overwriting any saved configuration, so only do this 
 # if you have the configuration embedded in the app already, or plan 
 # to manually configure it afterwards
-${ESPTOOL} --port $DEVICE --baud 230400 write_flash -fs 4m -ff 40m 0x00000 ${ESPDIR}/esp_iot_sdk_v1.5.1/bin/boot_v1.5.bin 0x1000 ${HEX} 0x7E000 ${ESPDIR}/esp_iot_sdk_v1.5.1/bin/blank.bin
+${ESPTOOL} --port $DEVICE --baud 230400 write_flash -fs 4m -ff 40m 0x00000 ${ESPDIR}/../esp_iot_sdk_v1.5.1/bin/boot_v1.5.bin 0x1000 ${HEX} 0x7E000 ${ESPDIR}/../esp_iot_sdk_v1.5.1/bin/blank.bin
+
+if [ -n "$AVRHEX" ] ; then
+	printf "Flashing %s to the atmega32u4, press reset to begin\n" "${AVRHEX}"
+	${AVRFLASH} ${AVRHEX}
+fi
 
