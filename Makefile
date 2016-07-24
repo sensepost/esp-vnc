@@ -448,6 +448,12 @@ endif
 
 # edit the loader script to add the espfs section to the end of irom with a 4 byte alignment.
 # we also adjust the sizes of the segments 'cause we need more irom0
+#
+# NB: If building on OS X, you should be using GNU sed!
+# If you install GNU sed using HomeBrew, you can do:
+# export PATH="/usr/local/opt/gnu-sed/libexec/gnubin:$PATH"
+# to have it used preferentially
+
 build/eagle.esphttpd1.v6.ld: $(SDK_LDDIR)/eagle.app.v6.new.1024.app1.ld
 	$(Q) sed -e '/\.irom\.text/{' -e 'a . = ALIGN (4);' -e 'a *(.espfs)' -e '}'  \
 			-e '/^  irom0_0_seg/ s/6B000/7C000/' \
