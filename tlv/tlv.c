@@ -97,23 +97,20 @@ tlvUartCb(char *buf, short length) {
       if (tlv_data_read == tlv_data.length) {
         // DBG("Complete packet read, channel %d, length %d at %d of %d\n", tlv_data.channel, tlv_data.length, pos, length);
 
-        if (tlv_data.channel == 0) {
-          if (tlv_data.length == 2 && tlv_data.data[0] == 0) {
+        if (tlv_data.channel == TLV_CONTROL) {
+          if (tlv_data.data[0] == TLV_CONTROL_FLOW && tlv_data.length == 2) {
             // DBG("TLV Flow control message: %d\n", tlv_data.data[1]);
             tlv_send_flow_paused = (tlv_data.data[1] != 0);
           }
+        }
+        tlv_receive_cb cb;
+        if (tlv_data.channel < TLV_MAX_HANDLERS) {
+          cb = tlv_cb[tlv_data.channel];
         } else {
-          tlv_receive_cb cb;
-          if (tlv_data.channel < TLV_MAX_HANDLERS) {
-            cb = tlv_cb[tlv_data.channel];
-          } else {
-            cb = tlv_cb[0];
-          }
-          if (cb != NULL) {
-            cb(&tlv_data);
-          } else {
-            // DBG("Received message for unregistered channel %d\n", tlv_data.channel);
-          }
+          cb = tlv_cb[0];
+        }
+        if (cb != NULL) {
+          cb(&tlv_data);
         }
         tlv_read_state = CHANNEL;
       }

@@ -231,8 +231,6 @@ serbridgeDisconCb(void *arg)
   // conn->rxbufferlen = 0;
 
   conn->conn = NULL;
-  char inactive[] = { 2, TLV_PIPE };
-  tlv_send(TLV_CONTROL, inactive, 2);
   DBG("SER connection closed, all buffers freed\n");
 }
 
@@ -287,15 +285,13 @@ serbridgeConnectCb(void *arg)
   espconn_regist_sentcb(conn, serbridgeSentCb);
 
   espconn_set_opt(conn, ESPCONN_REUSEADDR|ESPCONN_NODELAY);
-  char active[] = { 1, TLV_PIPE };
-  tlv_send(TLV_CONTROL, active, 2);
 }
 
 int8_t ICACHE_FLASH_ATTR
 serTlvCb(tlv_data_t *tlv_data) {
   if (tlv_data != NULL) {
-    if (tlv_data->channel == TLV_PIPE) {
-      DBG("%d bytes received\n", tlv_data->length);
+    switch(tlv_data->channel) {
+    case TLV_PIPE:
       // log them to the console
       for (short i=0; i<tlv_data->length; i++)
         console_write_char(tlv_data->data[i]);
@@ -306,9 +302,13 @@ serTlvCb(tlv_data_t *tlv_data) {
           espbuffsend(&connData[i], (char *) tlv_data->data, tlv_data->length);
         }
       }
-    } else if (tlv_data->channel == TLV_DEBUG) {
+      break;
+    case TLV_DEBUG:
       for (short i=0; i<tlv_data->length; i++)
         DBG("%c", tlv_data->data[i]);
+      break;
+    default:
+      break;
     }
   }
 
@@ -335,6 +335,7 @@ serbridgeInit(int port)
 
   tlv_register_channel_handler(TLV_PIPE, serTlvCb);
   tlv_register_channel_handler(TLV_DEBUG, serTlvCb);
+  tlv_register_channel_handler(TLV_CONTROL, serTlvCb);
 
   deferredTaskNum = register_usr_task(deferredTask);
 }

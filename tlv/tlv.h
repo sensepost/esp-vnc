@@ -11,7 +11,8 @@
 #define TLV_PIPE 2
 #define TLV_DEBUG 3
 
-#define TLV_RESUME_FLOW 0
+#define TLV_CONTROL_FLOW 0
+#define TLV_CONTROL_CONNECT 1
 
 typedef struct {
 	uint8_t channel;
