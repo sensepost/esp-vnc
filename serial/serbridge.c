@@ -65,9 +65,7 @@ deferredTask(os_event_t *events)
     } else if (connData[c].conn == NULL && connData[c].rxbuffer != NULL && connData[c].rxbufferlen == 0) {
       DBG("Freed RX buffer\n");
       os_free(connData[c].rxbuffer);
-      DBG("Defr: RX at %p\n", connData[c].rxbuffer);
       connData[c].rxbuffer = NULL;
-      connData[c].rxbufferlen = 0;
     }
     if (connData[c].rxbufferlen > 0)
       more = true;
@@ -225,10 +223,12 @@ serbridgeDisconCb(void *arg)
   conn->txbuffer = NULL;
   conn->txbufferlen = 0;
 
-  if (conn->rxbuffer != NULL) os_free(conn->rxbuffer);
-  DBG("SerDisc: RX at %p\n", conn->rxbuffer);
-  // conn->rxbuffer = NULL;
-  // conn->rxbufferlen = 0;
+  if (conn->rxbuffer != NULL && conn->rxbufferlen == 0) {
+    os_free(conn->rxbuffer);
+    conn->rxbuffer = NULL;
+  } else {
+    DBG("Serial RX buffer still has data, leaving it\n");
+  }
 
   conn->conn = NULL;
   DBG("SER connection closed, all buffers freed\n");
