@@ -291,6 +291,27 @@ int8_t ICACHE_FLASH_ATTR
 serTlvCb(tlv_data_t *tlv_data) {
   if (tlv_data != NULL) {
     switch(tlv_data->channel) {
+    case TLV_CONTROL:
+      if (tlv_data->length == 2 && tlv_data->data[0] == TLV_CONTROL_CONNECT) {
+        if (tlv_data->data[1] == 0) { // disconnect
+          for (short i=0; i<MAX_CONN; i++) {
+            if (connData[i].conn != NULL) {
+              connData[i].rxbufferlen = 0;
+              espconn_disconnect(connData[i].conn);
+            }
+            if (connData[i].rxbuffer != NULL) {
+              connData[i].rxbufferlen = 0;
+              os_free(connData[i].rxbuffer);
+            }
+          }
+          uint8_t data[] = { TLV_CONTROL_CONNECT, 0};
+          tlv_send(TLV_CONTROL, data, 2);
+        } else { // connect
+
+        }
+        DBG("CONTROL_CONNECT %d\n", tlv_data->data[1]);
+      }
+      break;
     case TLV_PIPE:
       // log them to the console
       for (short i=0; i<tlv_data->length; i++)

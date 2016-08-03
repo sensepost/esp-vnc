@@ -24,6 +24,8 @@ static uint32_t lastUart = 0;
 
 bool ICACHE_FLASH_ATTR
 tlv_is_send_paused() {
+  int gpio0 = GPIO_INPUT_GET(0);
+  if (gpio0 != 0) DBG("gpio0 is %d\n", gpio0);
   return tlv_send_flow_paused;
 }
 
@@ -135,4 +137,9 @@ void ICACHE_FLASH_ATTR tlv_poll_uart() {
     DBG("poll\n");
     tlvUartCb(recv, got);
   }
+}
+
+void ICACHE_FLASH_ATTR tlv_init() {
+  PIN_FUNC_SELECT(PERIPHS_IO_MUX_GPIO0_U, FUNC_GPIO0);
+  PIN_PULLUP_EN(PERIPHS_IO_MUX_GPIO0_U);
 }

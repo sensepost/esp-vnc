@@ -10,7 +10,7 @@
 
 // Send buffer size
 #define MAX_TXBUFFER (2*1460)
-#define MAX_RXBUFFER (6*1460)
+#define MAX_RXBUFFER (8*1460)
 
 typedef struct serbridgeConnData {
   uint16         rxbufferlen;   // length of data in rxbuffer
