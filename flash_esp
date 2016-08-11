@@ -19,7 +19,7 @@ sleep 2
 # if you have any additional USB Serial devices connected
 DEVICEPATTERN="/dev/cu.usbmodem* /dev/ttyACM*"
 
-DEVICE=`ls ${DEVICEPATTERN} 2> /dev/null | grep -v 1127451"`
+DEVICE=`ls ${DEVICEPATTERN} 2> /dev/null | grep -v 1127451`
 
 if [ -z "$DEVICE" ] ; then
 	printf "No device found, waiting for it to show up"
