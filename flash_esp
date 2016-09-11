@@ -11,13 +11,16 @@ ESP_PROG=${AVRDIR}/Program_ESP/Program_ESP.hex
 HEX="$1"
 AVRHEX="$2"
 
+# Flash the Program_ESP firmware to the avr, so we can then flash the ESP
 ${AVRFLASH} ${ESP_PROG}
 
 sleep 2
 
 # this device pattern works OK on Linux and OS X, but watch out
 # if you have any additional USB Serial devices connected
-DEVICEPATTERN="/dev/cu.usbmodem* /dev/ttyACM*"
+if [ -z "${DEVICEPATTERN}" ] ; then
+	DEVICEPATTERN="/dev/cu.usbmodem* /dev/ttyACM*"
+fi
 
 DEVICE=`ls ${DEVICEPATTERN} 2> /dev/null | grep -v 1127451`
 
@@ -42,7 +45,7 @@ fi
 ${ESPTOOL} --port $DEVICE --baud 230400 write_flash -fs 4m -ff 40m 0x00000 ${ESPDIR}/../esp_iot_sdk_v1.5.1/bin/boot_v1.5.bin 0x1000 ${HEX} 0x7E000 ${ESPDIR}/../esp_iot_sdk_v1.5.1/bin/blank.bin
 
 if [ -n "$AVRHEX" ] ; then
-	printf "Flashing %s to the atmega32u4, press reset to begin\n" "${AVRHEX}"
+	printf "Flashing %s to the atmega32u4, press RESET twice quickly to begin\n" "${AVRHEX}"
 	${AVRFLASH} ${AVRHEX}
 fi
 
