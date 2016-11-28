@@ -272,12 +272,12 @@ getModifier(uint32 key) {
   switch (key) {
   case 0xFFE3u: return 1 << 0; // left ctrl
   case 0xFFE1u: return 1 << 1; // left shift
-  case 0xFE03u: return 1 << 2; // left alt
-  case 0xFFE9u: return 1 << 3; // left gui
+  case 0xFFE9u: return 1 << 2; // left alt
+  case 0xFFE7u: return 1 << 3; // left gui
   case 0xFFE4u: return 1 << 4; // right ctrl
   case 0xFFE2u: return 1 << 5; // right shift;
-  case 0xFF7Eu: return 1 << 6; // right alt
-  case 0xFFEBu: return 1 << 7; // right gui
+  case 0xFFEAu: return 1 << 6; // right alt
+  case 0xFFE8u: return 1 << 7; // right gui
   case 0x21: // Keyboard 1 and !
   case 0x40: // Keyboard 2 and @
   case 0x23: // Keyboard 3 and #
