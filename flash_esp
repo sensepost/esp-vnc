@@ -22,14 +22,14 @@ if [ -z "${DEVICEPATTERN}" ] ; then
 	DEVICEPATTERN="/dev/cu.usbmodem* /dev/ttyACM*"
 fi
 
-DEVICE=`ls ${DEVICEPATTERN} 2> /dev/null | grep -v 1127451`
+DEVICE=`ls ${DEVICEPATTERN} 2> /dev/null`
 
 if [ -z "$DEVICE" ] ; then
 	printf "No device found, waiting for it to show up"
 	while [ -z "$DEVICE" ] ; do
 		sleep 1
 		printf "."
-		DEVICE=`ls ${DEVICEPATTERN} 2> /dev/null | grep -v 1127451`
+		DEVICE=`ls ${DEVICEPATTERN} 2> /dev/null`
 	done
 fi
 
